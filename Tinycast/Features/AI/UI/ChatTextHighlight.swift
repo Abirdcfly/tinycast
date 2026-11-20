@@ -44,11 +44,42 @@ extension View {
     }
 }
 
+private struct ChatTextHighlightKey: EnvironmentKey {
+    static let defaultValue: ChatTextHighlight? = nil
+}
+
+private struct ChatFindPathKey: EnvironmentKey {
+    static let defaultValue: [Int] = []
+}
+
+private struct ChatCitationsKey: EnvironmentKey {
+    static let defaultValue: [String: Int] = [:]
+}
+
+private struct ChatExpandsReasoningKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
 extension EnvironmentValues {
-    @Entry var chatTextHighlight: ChatTextHighlight?
+    var chatTextHighlight: ChatTextHighlight? {
+        get { self[ChatTextHighlightKey.self] }
+        set { self[ChatTextHighlightKey.self] = newValue }
+    }
+
     /// Where the enclosing view sits in its message, built the way `ChatFindIndex.leaves` builds it.
-    @Entry var chatFindPath: [Int] = []
+    var chatFindPath: [Int] {
+        get { self[ChatFindPathKey.self] }
+        set { self[ChatFindPathKey.self] = newValue }
+    }
+
     /// A reply's source numbers by URL key; empty everywhere but a finished reply with sources.
-    @Entry var chatCitations: [String: Int] = [:]
-    @Entry var chatExpandsReasoning = false
+    var chatCitations: [String: Int] {
+        get { self[ChatCitationsKey.self] }
+        set { self[ChatCitationsKey.self] = newValue }
+    }
+
+    var chatExpandsReasoning: Bool {
+        get { self[ChatExpandsReasoningKey.self] }
+        set { self[ChatExpandsReasoningKey.self] = newValue }
+    }
 }

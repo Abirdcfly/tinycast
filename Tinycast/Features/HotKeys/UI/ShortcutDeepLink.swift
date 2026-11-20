@@ -6,6 +6,13 @@ struct ShortcutDeepLink: Sendable {
     let copy: @MainActor @Sendable (URL) -> Void
 }
 
+private struct ShortcutDeepLinkKey: EnvironmentKey {
+    static let defaultValue: ShortcutDeepLink? = nil
+}
+
 extension EnvironmentValues {
-    @Entry var shortcutDeepLink: ShortcutDeepLink?
+    var shortcutDeepLink: ShortcutDeepLink? {
+        get { self[ShortcutDeepLinkKey.self] }
+        set { self[ShortcutDeepLinkKey.self] = newValue }
+    }
 }

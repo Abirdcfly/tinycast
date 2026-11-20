@@ -223,7 +223,14 @@ private func scaledPoints(_ value: CGFloat, _ scale: CGFloat) -> CGFloat {
     scale == 1 ? value : (value * scale).rounded()
 }
 
+private struct MetricsKey: EnvironmentKey {
+    static let defaultValue = InterfaceMetrics.standard
+}
+
 extension EnvironmentValues {
     /// `.standard` by default, so a shared `DesignSystem` view outside the palette never scales.
-    @Entry var metrics = InterfaceMetrics.standard
+    var metrics: InterfaceMetrics {
+        get { self[MetricsKey.self] }
+        set { self[MetricsKey.self] = newValue }
+    }
 }

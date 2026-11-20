@@ -47,6 +47,8 @@ brew install --cask tinycast@beta
 
 - **DMG:** notarized, download from [Releases](https://github.com/abue-ammar/tinycast/releases). Drag `Tinycast.app` to `/Applications`.
 - **Intel Mac:** install from [Homebrew tap](https://github.com/abue-ammar/homebrew-tinycast).
+- **Building on macOS 15:** this tree also builds for Intel Macs on macOS 15 without Xcode; see
+  [docs/macos15-intel.md](docs/macos15-intel.md).
 
 ## Support
 

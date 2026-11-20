@@ -4,13 +4,14 @@ import SwiftUI
 /// One stack per Settings window: bindings own presentation state, this owns only AppKit edges.
 @MainActor
 final class SettingsEditorPresenter: NSObject {
-    struct DismissAction {
-        private let action: () -> Void
+    struct DismissAction: Sendable {
+        private let action: @MainActor @Sendable () -> Void
 
-        init(_ action: @escaping () -> Void = {}) {
+        init(_ action: @MainActor @Sendable @escaping () -> Void = {}) {
             self.action = action
         }
 
+        @MainActor
         func callAsFunction() {
             action()
         }
@@ -353,9 +354,24 @@ final class SettingsEditorPresenter: NSObject {
     }
 }
 
+private struct SettingsEditorDismissKey: EnvironmentKey {
+    static let defaultValue = SettingsEditorPresenter.DismissAction()
+}
+
+private struct SettingsEditorPresenterKey: EnvironmentKey {
+    static let defaultValue: SettingsEditorPresenter? = nil
+}
+
 extension EnvironmentValues {
-    @Entry var settingsEditorDismiss = SettingsEditorPresenter.DismissAction()
-    @Entry var settingsEditorPresenter: SettingsEditorPresenter?
+    var settingsEditorDismiss: SettingsEditorPresenter.DismissAction {
+        get { self[SettingsEditorDismissKey.self] }
+        set { self[SettingsEditorDismissKey.self] = newValue }
+    }
+
+    var settingsEditorPresenter: SettingsEditorPresenter? {
+        get { self[SettingsEditorPresenterKey.self] }
+        set { self[SettingsEditorPresenterKey.self] = newValue }
+    }
 }
 
 extension View {

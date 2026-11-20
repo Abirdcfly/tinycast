@@ -23,7 +23,12 @@ if [ "${1:-}" = "--exec" ]; then
         exit 0
     }
     TIMEFORMAT=%1R
-    if ! compiled=$( { time swiftc -swift-version 6 "$opt" "$@" "Tests/$name.swift" -o "$BIN/$name" > "$BIN/$name.log" 2>&1; } 2>&1 ); then
+    # FoundationModels ships only on macOS 26: weak-link it so the harness loads on 15.
+    weak=""
+    if [ "$name" = AppleIntelligenceTests ]; then
+        weak="-Xlinker -weak_framework -Xlinker FoundationModels"
+    fi
+    if ! compiled=$( { time swiftc -swift-version 6 "$opt" $weak "$@" "Tests/$name.swift" -o "$BIN/$name" > "$BIN/$name.log" 2>&1; } 2>&1 ); then
         fail "did not compile"
     fi
     { time "$BIN/$name" > "$BIN/$name.log" 2>&1; } 2> "$BIN/$name.time" &

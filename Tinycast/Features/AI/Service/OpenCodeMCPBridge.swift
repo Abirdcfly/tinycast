@@ -1,6 +1,9 @@
+import Darwin
 import Foundation
 import Network
 
+/// The loopback MCP server OpenCode talks to. macOS 26 has the Swift-native Network listener;
+/// below it the same job runs on `NWListener`, whose callbacks are wrapped here.
 @MainActor
 final class OpenCodeMCPBridge {
     private let session: AIToolSession
@@ -9,12 +12,15 @@ final class OpenCodeMCPBridge {
     private let bearer = UUID().uuidString + UUID().uuidString
     private let server = "tinycast_" + UUID().uuidString.replacingOccurrences(of: "-", with: "")
     private var task: Task<Void, Never>?
+    private var listener: NWListener?
     private var ready: CheckedContinuation<UInt16, Error>?
     private var stopped = false
     private var calls = 0
     private var spent = 0
     private var invoking = false
     private var waiting: [CheckedContinuation<Void, Error>] = []
+
+    nonisolated private static let queue = DispatchQueue(label: "com.tinycast.opencode-bridge")
 
     init(
         session: AIToolSession, event: @escaping (AIStreamEvent) -> Void,
@@ -25,37 +31,29 @@ final class OpenCodeMCPBridge {
         self.failure = failure
     }
 
-    isolated deinit { task?.cancel() }
+    isolated deinit {
+        task?.cancel()
+        listener?.cancel()
+    }
 
     func start() async throws -> String {
-        let listener = try NetworkListener(
-            using: .parameters { TCP() }
-                .localEndpoint(.hostPort(host: .ipv4(.loopback), port: .any)))
+        guard let listener = Self.makeListener() else {
+            throw URLError(.cannotConnectToHost)
+        }
+        self.listener = listener
         listener.newConnectionLimit = 16
+        listener.stateUpdateHandler = { [weak self] state in
+            Task { @MainActor in self?.stateChanged(state) }
+        }
+        listener.newConnectionHandler = { [weak self] connection in
+            Task { @MainActor in await self?.receive(connection) }
+        }
+
         let port = try await withTaskCancellationHandler {
             try Task.checkCancellation()
             return try await withCheckedThrowingContinuation { continuation in
                 ready = continuation
-                task = Task { [weak self] in
-                    do {
-                        try await listener.onStateUpdate { [weak self] listener, state in
-                            switch state {
-                            case .ready:
-                                guard let port = listener.port?.rawValue else { return }
-                                self?.ready?.resume(returning: port)
-                                self?.ready = nil
-                            case .waiting, .failed:
-                                self?.fail(URLError(.cannotConnectToHost))
-                            default: break
-                            }
-                        }.run { [weak self] connection in
-                            defer { listener.newConnectionLimit += 1 }
-                            await self?.receive(connection)
-                        }
-                    } catch {
-                        self?.fail(error)
-                    }
-                }
+                listener.start(queue: Self.queue)
             }
         } onCancel: {
             Task { @MainActor [weak self] in self?.stop() }
@@ -73,6 +71,8 @@ final class OpenCodeMCPBridge {
         ready = nil
         for waiter in waiting { waiter.resume(throwing: CancellationError()) }
         waiting = []
+        listener?.cancel()
+        listener = nil
         task?.cancel()
         task = nil
     }
@@ -85,20 +85,71 @@ final class OpenCodeMCPBridge {
         failure(error.localizedDescription)
     }
 
-    private func receive(_ connection: NetworkConnection<TCP>) async {
-        do {
-            let body = try await withThrowingTaskGroup(of: Data.self) { group in
-                group.addTask { [weak self] in
-                    guard let self else { throw CancellationError() }
-                    return try await self.read(connection)
-                }
-                group.addTask {
-                    try await Task.sleep(for: .seconds(5))
-                    throw URLError(.timedOut)
-                }
-                defer { group.cancelAll() }
-                return try await group.next() ?? Data()
+    private func stateChanged(_ state: NWListener.State) {
+        switch state {
+        case .ready:
+            guard let port = listener?.port?.rawValue else {
+                fail(URLError(.cannotConnectToHost))
+                return
             }
+            ready?.resume(returning: port)
+            ready = nil
+        case .waiting, .failed:
+            fail(URLError(.cannotConnectToHost))
+        default:
+            break
+        }
+    }
+
+    /// `requiredLocalEndpoint` refuses port zero, so a free one is claimed and handed over.
+    private static func makeListener() -> NWListener? {
+        for _ in 0..<5 {
+            guard let port = freeLoopbackPort() else { continue }
+            let parameters = NWParameters.tcp
+            parameters.allowLocalEndpointReuse = true
+            parameters.requiredLocalEndpoint = .hostPort(
+                host: .ipv4(.loopback), port: NWEndpoint.Port(rawValue: port)!)
+            if let listener = try? NWListener(using: parameters) { return listener }
+        }
+        return nil
+    }
+
+    private static func freeLoopbackPort() -> UInt16? {
+        let descriptor = socket(AF_INET, SOCK_STREAM, 0)
+        guard descriptor >= 0 else { return nil }
+        defer { close(descriptor) }
+
+        var address = sockaddr_in()
+        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_port = 0
+        address.sin_addr.s_addr = inet_addr("127.0.0.1")
+        let bound = withUnsafePointer(to: &address) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                bind(descriptor, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+        guard bound == 0 else { return nil }
+
+        var assigned = sockaddr_in()
+        var length = socklen_t(MemoryLayout<sockaddr_in>.size)
+        let named = withUnsafeMutablePointer(to: &assigned) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                getsockname(descriptor, $0, &length)
+            }
+        }
+        guard named == 0 else { return nil }
+        return UInt16(bigEndian: assigned.sin_port)
+    }
+
+    private func receive(_ connection: NWConnection) async {
+        connection.start(queue: Self.queue)
+        defer {
+            connection.cancel()
+            listener?.newConnectionLimit += 1
+        }
+        do {
+            let body = try await read(connection)
             guard !stopped else { return }
             let result = try await respond(body)
             try Task.checkCancellation()
@@ -115,13 +166,13 @@ final class OpenCodeMCPBridge {
         let status: String
     }
 
-    private func read(_ connection: NetworkConnection<TCP>) async throws -> Data {
+    private func read(_ connection: NWConnection) async throws -> Data {
         var bytes = Data()
         var bodyStart: Int?
         var length = 0
         while true {
-            let message = try await connection.receive(atLeast: 1, atMost: 8192)
-            bytes.append(message.content)
+            let (chunk, isComplete) = try await receiveSome(connection, atMost: 8192)
+            bytes.append(chunk)
             if bodyStart == nil {
                 if let separator = bytes.range(of: Data("\r\n\r\n".utf8)) {
                     guard separator.lowerBound <= 8192,
@@ -159,7 +210,20 @@ final class OpenCodeMCPBridge {
             if let bodyStart, bytes.count >= bodyStart + length {
                 return Data(bytes[bodyStart..<(bodyStart + length)])
             }
-            if message.metadata.endOfStream { throw HTTPFailure(status: "400 Bad Request") }
+            if isComplete { throw HTTPFailure(status: "400 Bad Request") }
+        }
+    }
+
+    private func receiveSome(_ connection: NWConnection, atMost: Int) async throws -> (Data, Bool) {
+        try await withCheckedThrowingContinuation { continuation in
+            connection.receive(minimumIncompleteLength: 1, maximumLength: atMost) {
+                data, _, isComplete, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume(returning: (data ?? Data(), isComplete))
+                }
+            }
         }
     }
 
@@ -260,15 +324,23 @@ final class OpenCodeMCPBridge {
         ])
     }
 
-    private func send(
-        _ connection: NetworkConnection<TCP>, status: String, body: Data?
-    ) async throws {
+    private func send(_ connection: NWConnection, status: String, body: Data?) async throws {
         let body = body ?? Data()
         var response = Data(
             ("HTTP/1.1 \(status)\r\nContent-Type: application/json\r\n"
                 + "Cache-Control: no-store\r\nConnection: close\r\n"
                 + "Content-Length: \(body.count)\r\n\r\n").utf8)
         response.append(body)
-        try await connection.send(response, endOfStream: true)
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            connection.send(
+                content: response, contentContext: .defaultMessage, isComplete: true,
+                completion: .contentProcessed { error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                    } else {
+                        continuation.resume()
+                    }
+                })
+        }
     }
 }

@@ -11,7 +11,7 @@ final class WindowSwitchSession {
     /// Live AX handles, so they are never observed and never outlive the show.
     @ObservationIgnored private var elements: [Int: WindowSwitchSweep.Element] = [:]
     /// Held only while rows are shown, so an app that quits takes its rows with it.
-    @ObservationIgnored private var terminationToken: NotificationCenter.ObservationToken?
+    @ObservationIgnored private var terminationObservation: NotificationObservation?
 
     func present(_ snapshot: WindowSwitchSweep.Snapshot) {
         self.snapshot = WindowSwitchOrder.sorted(snapshot.entries)
@@ -23,10 +23,7 @@ final class WindowSwitchSession {
     func element(for handle: Int) -> WindowSwitchSweep.Element? { elements[handle] }
 
     func reset() {
-        if let terminationToken {
-            NSWorkspace.shared.notificationCenter.removeObserver(terminationToken)
-        }
-        terminationToken = nil
+        terminationObservation = nil
         snapshot = []
         filtered = []
         elements = [:]
@@ -47,10 +44,18 @@ final class WindowSwitchSession {
     }
 
     private func observeTerminations() {
-        guard terminationToken == nil else { return }
-        terminationToken = NSWorkspace.shared.notificationCenter.addObserver(
-            of: NSWorkspace.shared, for: NSWorkspace.DidTerminateApplicationMessage.self
-        ) { [weak self] in self?.removeWindows(of: $0.application.processIdentifier) }
+        guard terminationObservation == nil else { return }
+        let token = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didTerminateApplicationNotification, object: nil, queue: .main
+        ) { [weak self] notification in
+            guard
+                let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey]
+                    as? NSRunningApplication
+            else { return }
+            MainActor.assumeIsolated { self?.removeWindows(of: app.processIdentifier) }
+        }
+        terminationObservation = NotificationObservation(
+            center: NSWorkspace.shared.notificationCenter, tokens: [token])
     }
 
     private func removeWindows(of pid: pid_t) {

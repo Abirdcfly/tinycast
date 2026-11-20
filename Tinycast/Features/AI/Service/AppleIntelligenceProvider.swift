@@ -1,27 +1,29 @@
 import FoundationModels
 import Foundation
 
-/// The only provider with nothing to configure, so a first run may select it unasked.
+/// FoundationModels is a macOS 26 framework, so the provider reports its absence as just another
+/// status: everything below only reaches the model behind `#available`.
 struct AppleIntelligenceProvider: AIProvider {
     /// The caller's, not a constant: the default filter refuses text the reader already wrote.
-    let guardrails: SystemLanguageModel.Guardrails
+    let guardrails: AppleIntelligenceGuardrails
 
-    init(guardrails: SystemLanguageModel.Guardrails = .default) {
+    init(guardrails: AppleIntelligenceGuardrails = .default) {
         self.guardrails = guardrails
     }
 
     static func status() -> AppleIntelligenceStatus {
-        switch SystemLanguageModel.default.availability {
-        case .available: return .available
-        case .unavailable(.deviceNotEligible): return .deviceNotEligible
-        case .unavailable(.appleIntelligenceNotEnabled): return .notEnabled
-        case .unavailable(.modelNotReady): return .modelNotReady
-        @unknown default: return .modelNotReady
-        }
+        guard #available(macOS 26.0, *) else { return .requiresNewerSystem }
+        return systemStatus()
     }
 
     func stream(_ request: AIRequest) -> AIProviderStream {
         AIProviderStream { continuation in
+            guard #available(macOS 26.0, *) else {
+                continuation.finish(
+                    throwing: AIProviderError.unavailable(
+                        AppleIntelligenceStatus.requiresNewerSystem.message ?? ""))
+                return
+            }
             // Session and stream are born here: `ResponseStream` is `sending` and cannot cross.
             let task = Task.detached {
                 do {
@@ -30,10 +32,12 @@ struct AppleIntelligenceProvider: AIProvider {
                     }
                     let turn = Self.turn(for: request)
                     guard let prompt = turn.prompt else {
-                        throw AIProviderError.responseFailed(String(localized: "There was nothing to send."))
+                        throw AIProviderError.responseFailed(
+                            String(localized: "There was nothing to send."))
                     }
                     let session = LanguageModelSession(
-                        model: SystemLanguageModel(guardrails: guardrails),
+                        model: SystemLanguageModel(
+                            guardrails: Self.systemGuardrails(guardrails)),
                         transcript: turn.transcript)
                     let options = GenerationOptions(
                         maximumResponseTokens: min(
@@ -55,6 +59,28 @@ struct AppleIntelligenceProvider: AIProvider {
                 }
             }
             continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+}
+
+@available(macOS 26.0, *)
+extension AppleIntelligenceProvider {
+    private static func systemStatus() -> AppleIntelligenceStatus {
+        switch SystemLanguageModel.default.availability {
+        case .available: return .available
+        case .unavailable(.deviceNotEligible): return .deviceNotEligible
+        case .unavailable(.appleIntelligenceNotEnabled): return .notEnabled
+        case .unavailable(.modelNotReady): return .modelNotReady
+        @unknown default: return .modelNotReady
+        }
+    }
+
+    private static func systemGuardrails(
+        _ guardrails: AppleIntelligenceGuardrails
+    ) -> SystemLanguageModel.Guardrails {
+        switch guardrails {
+        case .default: return .default
+        case .permissiveContentTransformations: return .permissiveContentTransformations
         }
     }
 

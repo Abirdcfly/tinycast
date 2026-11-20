@@ -249,12 +249,16 @@ enum CalcEngine {
                 payload: payload)
         }
 
-        return CalcPercent.evaluate(tokens, query: query) ?? CalcRounding.evaluate(tokens, query: query)
-            ?? CalcFinance.evaluate(tokens, query: query) ?? CalcGrowth.evaluate(tokens, query: query)
-            ?? CalcSpokenMath.evaluate(tokens, query: query)
-            ?? CalcStatistics.evaluate(tokens, query: query) ?? CalcRatePhrases.evaluate(tokens, query: query)
-            ?? CalcSubstance.evaluate(tokens, query: query) ?? CalcPixelDensity.evaluate(tokens, query: query)
-            ?? CalcPitch.evaluate(tokens, query: query)
+        // One `??` chain this long times out the type checker; the sequence asks the same question.
+        for evaluator in [
+            CalcPercent.evaluate, CalcRounding.evaluate, CalcFinance.evaluate,
+            CalcGrowth.evaluate, CalcSpokenMath.evaluate, CalcStatistics.evaluate,
+            CalcRatePhrases.evaluate, CalcSubstance.evaluate, CalcPixelDensity.evaluate,
+            CalcPitch.evaluate,
+        ] {
+            if let result = evaluator(tokens, query) { return result }
+        }
+        return nil
     }
 
     private static func paceInMinutes(_ query: String) -> String {

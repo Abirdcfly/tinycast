@@ -365,7 +365,7 @@ struct RootPaletteView: View {
                 .background(isCollapsed ? .clear : Theme.Colors.panelScrim)
                 // Square, as rounded glass feathers its edge; the clip alone cuts a crisp corner.
                 .background {
-                    Color.clear.glassEffect(isCollapsed ? .identity : .regular, in: Rectangle())
+                    Color.clear.tinyGlass(isCollapsed ? .identity : .regular, in: Rectangle())
                 }
                 .overlay {
                     Theme.Colors.dialogDimming
@@ -418,7 +418,8 @@ struct RootPaletteView: View {
     /// Split from `body` for the same reason `keyHandlers` is: one chain cannot carry them all.
     @ViewBuilder
     private func stateObservers(_ content: some View) -> some View {
-        emojiObservers(content)
+        let focused =
+            emojiObservers(content)
             // Every show bumps focusToken so the search field refocuses.
             .onChange(of: vm.focusToken) {
                 resetCompactSelection()
@@ -433,6 +434,8 @@ struct RootPaletteView: View {
             }
             // A preserved screen re-summons as it was left, so a menu must end with the palette.
             .modifier(PaletteHideObserver { if menuOpen { closeMenus() } })
+        let queried =
+            focused
             .onChange(of: vm.query) {
                 resetCompactSelection()
                 if vm.collapseQueryLineBreaks() { return }
@@ -520,6 +523,8 @@ struct RootPaletteView: View {
                 menuPanel.hide()
                 (hostWindow as? PalettePanel)?.onHeaderFieldBoundaryArrow = nil
             }
+        let presented =
+            queried
             // The first show builds this view after `prepare`, so no handler saw that reset.
             .onAppear {
                 searchFocused = !screen.hidesSearchField
@@ -532,6 +537,7 @@ struct RootPaletteView: View {
                 resetCompactSelection()
                 core.paletteCoordinator.syncPaletteSize()
             }
+        presented
     }
 
     /// Split from `body`: one chain of this length is past what the type-checker will infer.

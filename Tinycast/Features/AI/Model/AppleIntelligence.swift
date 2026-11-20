@@ -6,11 +6,12 @@ enum AppleIntelligenceStatus: Equatable, Sendable {
     case deviceNotEligible
     case notEnabled
     case modelNotReady
+    case requiresNewerSystem
 
     var isAvailable: Bool { self == .available }
 
-    /// False only when the hardware rules it out, so System Settings has nothing to offer.
-    var isSupported: Bool { self != .deviceNotEligible }
+    /// False only when nothing here can be offered, so the picker leaves the route out.
+    var isSupported: Bool { self != .deviceNotEligible && self != .requiresNewerSystem }
 
     /// `nil` while the model can run, so a caller can treat it as the whole failure condition.
     var message: String? {
@@ -26,8 +27,15 @@ enum AppleIntelligenceStatus: Equatable, Sendable {
             return String(
                 localized: "Apple Intelligence is currently unavailable. Check its status in System Settings."
             )
+        case .requiresNewerSystem:
+            return String(localized: "Apple Intelligence needs macOS 26 or later.")
         }
     }
+}
+
+enum AppleIntelligenceGuardrails: Sendable {
+    case `default`
+    case permissiveContentTransformations
 }
 
 enum AppleIntelligence {

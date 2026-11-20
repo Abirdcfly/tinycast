@@ -35,12 +35,12 @@ struct OverflowFadeMask: ViewModifier {
     private func stops(height: CGFloat) -> [Gradient.Stop] {
         guard includesTop else { return bottomStops(height: height) }
         // Popup edges use several stops so neither end cuts abruptly through a row.
-        let topStrength = min(overflow.top / band, 1)
-        let bottomStrength = min(overflow.bottom / band, 1)
+        let topStrength = min(Double(overflow.top / band), 1)
+        let bottomStrength = min(Double(overflow.bottom / band), 1)
         guard max(topStrength, bottomStrength) > 0, height > 0 else {
             return [.init(color: .black, location: 0)]
         }
-        let extent = min(band / height, 0.5)
+        let extent: CGFloat = min(band / height, 0.5)
         return [
             .init(color: .black.opacity(1 - topStrength), location: 0),
             .init(
@@ -63,7 +63,7 @@ struct OverflowFadeMask: ViewModifier {
 
     /// The original Settings and Notes curve stays unchanged when no popup opts into its top edge.
     private func bottomStops(height: CGFloat) -> [Gradient.Stop] {
-        let strength = min(overflow.bottom / band, 1)
+        let strength = min(Double(overflow.bottom / band), 1)
         guard strength > 0, height > band else { return [.init(color: .black, location: 0)] }
         return [
             .init(color: .black, location: 0),

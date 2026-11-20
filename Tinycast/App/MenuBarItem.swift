@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// Tinycast's own menu-bar item. It carries no feature state, so no feature can hide or reshape it.
@@ -5,8 +6,15 @@ struct MenuBarLabel: View {
     let appName: String
 
     var body: some View {
-        Image("MenuBarIcon")
+        Image(nsImage: Self.icon)
             .accessibilityLabel(appName)
+    }
+
+    /// Loaded by name rather than as an asset so a build without a catalog still has its template.
+    private static var icon: NSImage {
+        let image = NSImage(named: "MenuBarIcon") ?? NSImage()
+        image.isTemplate = true
+        return image
     }
 }
 

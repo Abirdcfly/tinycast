@@ -8,6 +8,7 @@ enum TextTranslator {
         case undetectableSource
         case unsupported
         case notInstalled(language: String)
+        case requiresNewerSystem
         case failed
 
         var errorDescription: String? {
@@ -18,6 +19,8 @@ enum TextTranslator {
                 return String(localized: "Apple's translator does not support this language pair.")
             case .notInstalled(let language):
                 return String(localized: "\(language) needs to be downloaded before it can be used.")
+            case .requiresNewerSystem:
+                return String(localized: "Apple's translator needs macOS 26 or later.")
             case .failed:
                 return String(localized: "The text could not be translated.")
             }
@@ -66,6 +69,8 @@ enum TextTranslator {
     private static func translate(
         _ text: String, from source: Locale.Language, to target: Locale.Language
     ) async throws -> String {
+        // A session is only constructible from macOS 26; earlier systems reach it through SwiftUI.
+        guard #available(macOS 26.0, *) else { throw Failure.requiresNewerSystem }
         do {
             let session = TranslationSession(installedSource: source, target: target)
             return try await session.translate(text).targetText

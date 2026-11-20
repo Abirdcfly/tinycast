@@ -271,11 +271,11 @@ private struct SettingsEditorPanelSurface: ViewModifier {
         if controlsOnGlass {
             draggable
                 .background(Theme.Colors.panelScrim, in: shape)
-                .glassEffect(.regular, in: shape)
+                .tinyGlass(.regular, in: shape)
         } else {
             draggable
                 .background(Theme.Colors.panelScrim, in: shape)
-                .background { Color.clear.glassEffect(.regular, in: shape) }
+                .background { Color.clear.tinyGlass(.regular, in: shape) }
         }
     }
 }
